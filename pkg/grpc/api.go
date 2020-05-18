@@ -33,6 +33,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -175,9 +176,22 @@ func (a *api) PublishEvent(ctx context.Context, in *daprv1pb.PublishEventEnvelop
 func (a *api) InvokeService(ctx context.Context, in *daprv1pb.InvokeServiceRequest) (*commonv1pb.InvokeResponse, error) {
 	req := invokev1.FromInvokeRequestMessage(in.GetMessage())
 
+	outgoingMD := map[string][]string{}
+
 	if incomingMD, ok := metadata.FromIncomingContext(ctx); ok {
-		req.WithMetadata(incomingMD)
+		for key, val := range incomingMD {
+			outgoingMD[key] = val
+			if key == ":authority" {
+				outgoingMD["X-Forwarded-Host"] = val
+			}
+		}
 	}
+
+	if p, ok := peer.FromContext(ctx); ok {
+		outgoingMD["X-Forwarded-For"] = []string{p.Addr.String()}
+	}
+
+	req.WithMetadata(outgoingMD)
 
 	resp, err := a.directMessaging.Invoke(ctx, in.Id, req)
 	if err != nil {
